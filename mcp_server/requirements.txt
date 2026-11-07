@@ -1,0 +1,6 @@
+# Dependencies for the changedetection.io MCP sidecar.
+# Installed by the Dockerfile into the application image, and by
+# `pip install -r mcp_server/requirements.txt` for a local stdio server.
+# Kept out of requirements.txt so the web app install stays unchanged.
+mcp~=2.3.0
+requests>=2.31

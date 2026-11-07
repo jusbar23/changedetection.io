@@ -133,11 +133,13 @@ Easily add the current web page to your changedetection.io tool, simply install 
 
 ### Docker
 
-With Docker composer, just clone this repository and..
+With Docker Compose, clone this repository and run:
 
 ```bash
 $ docker compose up -d
 ```
+
+That builds this fork and starts changedetection.io on http://127.0.0.1:5000 plus the MCP server on http://127.0.0.1:8000/mcp. See [MCP server](#mcp-server) for the API key and client setup.
 
 Docker standalone
 ```bash
@@ -178,7 +180,7 @@ docker run -d --restart always -p "127.0.0.1:5000:5000" -v datastore-volume:/dat
 ### docker compose
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose build && docker compose up -d
 ```
 
 See the wiki for more information https://github.com/dgtlmoon/changedetection.io/wiki
@@ -281,6 +283,117 @@ Excel import is recommended - that way you can better organise tags/groups of we
 ## API Support
 
 Supports managing the website watch list [via our API](https://changedetection.io/docs/api_v1/index.html)
+
+## MCP server
+
+An MCP server in `mcp_server/` exposes that same REST API (`/api/v1`) as tools so an assistant can list and search watches, read a watch plus its latest and previous snapshots, history, and a unified diff, create and update watches (URL, title, tags, check interval, CSS/XPath/JSONPath/jq filters, notification URLs), pause, unpause, mute, queue a recheck, manage tags, and read system info.
+
+The server does not import the Flask app. Diffs are built from the text snapshots the history API already returns, because `/api/v1` has no diff route. The web app's default command is unchanged. In Docker, Compose runs the web app and the MCP server as two containers from the same image.
+
+### Run with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `CHANGEDETECTION_BASE_URL` | MCP | App URL. Compose sets `http://changedetection:5000`. |
+| `CHANGEDETECTION_API_KEY` | MCP | Sent as `x-api-key`. Copy it from **Settings → API** in the UI. |
+| `CHANGEDETECTION_TIMEOUT` | MCP | API timeout in seconds (default `60`). |
+| `MCP_HOST` | MCP | Bind address (Compose sets `0.0.0.0`). |
+| `MCP_PORT` | MCP | Bind port inside the container (default `8000`). |
+| `MCP_BEARER_TOKEN` | MCP | When set, HTTP clients must send `Authorization: Bearer <token>`. |
+| `MCP_PUBLIC_URL` | MCP | Public URL advertised for the endpoint (default `http://127.0.0.1:8000/mcp`). |
+| `MCP_TRANSPORT` | MCP | `stdio` (default) or `streamable-http`. |
+
+Put the API key in a `.env` file next to `docker-compose.yml` (that file is gitignored):
+
+```
+CHANGEDETECTION_API_KEY=your-key-here
+MCP_BEARER_TOKEN=optional-shared-secret
+```
+
+`MCP_BEARER_TOKEN` is optional. Then start (or restart) the stack:
+
+```bash
+docker compose up -d
+```
+
+The MCP endpoint is `http://127.0.0.1:8000/mcp`.
+
+### Run from a checkout
+
+```bash
+pip install -r mcp_server/requirements.txt
+export CHANGEDETECTION_BASE_URL=http://127.0.0.1:5000
+export CHANGEDETECTION_API_KEY=your-key-here
+python -m mcp_server
+```
+
+That uses stdio, which local assistants launch as a subprocess. For a remote assistant, listen on streamable HTTP:
+
+```bash
+python -m mcp_server --transport streamable-http
+```
+
+The same image can do that without Compose. `changedetection-mcp` is a wrapper that runs the server from its own virtualenv, so those packages stay off the web app's `PYTHONPATH`:
+
+```bash
+docker run --rm -p 127.0.0.1:8000:8000 \
+  -e CHANGEDETECTION_BASE_URL=http://changedetection:5000 \
+  -e CHANGEDETECTION_API_KEY=your-key-here \
+  -e MCP_HOST=0.0.0.0 \
+  --network <the-app-network> \
+  changedetectionio:local changedetection-mcp --transport streamable-http
+```
+
+`CHANGEDETECTION_BASE_URL` has to be reachable from that container. Compose sets it to `http://changedetection:5000` on the project network.
+
+### Connect a client
+
+Streamable HTTP (Cursor, or any client that accepts an MCP URL):
+
+```json
+{
+  "mcpServers": {
+    "changedetection": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer optional-shared-secret"
+      }
+    }
+  }
+}
+```
+
+Omit `headers` when `MCP_BEARER_TOKEN` is unset. stdio, for a client that starts the process itself:
+
+```json
+{
+  "mcpServers": {
+    "changedetection": {
+      "command": "python",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "CHANGEDETECTION_BASE_URL": "http://127.0.0.1:5000",
+        "CHANGEDETECTION_API_KEY": "your-key-here"
+      }
+    }
+  }
+}
+```
+
+Run the client with `PYTHONPATH` pointing at this repository, or from the Docker image, whose working directory is `/app`.
+
+### Tests
+
+```bash
+pip install -r mcp_server/requirements.txt pytest
+pytest mcp_server/tests
+```
+
+The tests mock `/api/v1` and also exercise stdio and streamable HTTP (including a rejected bearer token). They do not need a running changedetection.io.
 
 ## Support us
 
