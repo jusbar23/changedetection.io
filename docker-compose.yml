@@ -1,6 +1,9 @@
 services:
     changedetection:
-      image: ghcr.io/dgtlmoon/changedetection.io
+      # Built from this fork so the image contains the MCP server as well as the web app.
+      # The web process is still the image's default command; see the `mcp` service below.
+      build: .
+      image: changedetectionio:local
       container_name: changedetection
       hostname: changedetection
       volumes:
@@ -83,6 +86,37 @@ services:
       # Comment out ports: when using behind a reverse proxy , enable networks: etc.
       ports:
         - 127.0.0.1:5000:5000
+      healthcheck:
+        test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]
+        interval: 5s
+        timeout: 5s
+        retries: 20
+        start_period: 15s
+      restart: unless-stopped
+
+    # Streamable HTTP MCP endpoint. Talks to the web app over /api/v1.
+    # Set CHANGEDETECTION_API_KEY to the key shown in the UI under Settings → API
+    # (or in the datastore file url-watches.json). Optional MCP_BEARER_TOKEN
+    # requires Authorization: Bearer <token> on http://127.0.0.1:8000/mcp.
+    mcp:
+      build: .
+      image: changedetectionio:local
+      container_name: changedetection-mcp
+      depends_on:
+        changedetection:
+          condition: service_healthy
+      environment:
+        CHANGEDETECTION_BASE_URL: http://changedetection:5000
+        CHANGEDETECTION_API_KEY: ${CHANGEDETECTION_API_KEY:-}
+        CHANGEDETECTION_TIMEOUT: ${CHANGEDETECTION_TIMEOUT:-60}
+        MCP_HOST: 0.0.0.0
+        MCP_PORT: 8000
+        MCP_TRANSPORT: streamable-http
+        MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+        MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://127.0.0.1:8000/mcp}
+      command: ["changedetection-mcp", "--transport", "streamable-http"]
+      ports:
+        - 127.0.0.1:8000:8000
       restart: unless-stopped
 
      # Used for fetching pages via WebDriver+Chrome where you need Javascript support.

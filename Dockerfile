@@ -73,11 +73,22 @@ COPY --from=builder /dependencies /usr/local
 ENV PYTHONPATH=/usr/local
 
 EXPOSE 5000
+# Streamable HTTP MCP endpoint (started only when the container command is the MCP server).
+EXPOSE 8000
 
 # The actual flask app module
 COPY changedetectionio /app/changedetectionio
 # Starting wrapper
 COPY changedetection.py /app/changedetection.py
+# MCP server package. The default CMD below is still the web app.
+# Dependencies live in /opt/mcp so they cannot change the web app's packages.
+COPY mcp_server /app/mcp_server
+COPY mcp_server/docker-entrypoint.sh /usr/local/bin/changedetection-mcp
+# PYTHONPATH=/usr/local is set for the web app. Clear it for this install so pip
+# does not treat those packages as already present and skip them in the venv.
+RUN python -m venv /opt/mcp \
+    && PYTHONPATH= /opt/mcp/bin/pip install --no-cache-dir -r /app/mcp_server/requirements.txt \
+    && chmod +x /usr/local/bin/changedetection-mcp
 
 # Github Action test purpose(test-only.yml).
 # On production, it is effectively LOGGER_LEVEL=''.
