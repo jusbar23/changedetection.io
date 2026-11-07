@@ -1,0 +1,41 @@
+{
+  "comment": "Fixture for the three alerts the workers already send. Restock and price changes are content_changed.",
+  "application": {
+    "notification_urls": ["mailto://system@example.com"],
+    "notification_group_routes": {"step_failure": "missing-group"},
+    "notification_groups": {
+      "oncall": {
+        "uuid": "oncall",
+        "title": "On-call",
+        "notification_urls": ["mailto://oncall@example.com", "mailto://oncall@example.com", "# comment"]
+      },
+      "filters": {
+        "uuid": "filters",
+        "title": "Filter desk",
+        "notification_urls": ["mailto://filters@example.com"]
+      },
+      "silent": {
+        "uuid": "silent",
+        "title": "Nobody",
+        "notification_urls": []
+      }
+    }
+  },
+  "tags": {
+    "tag-1": {
+      "uuid": "tag-1",
+      "title": "Billing",
+      "notification_muted": false,
+      "notification_urls": ["mailto://tag@example.com"],
+      "notification_group_routes": {"filter_failure": "filters"}
+    }
+  },
+  "watch": {
+    "uuid": "watch-1",
+    "url": "https://example.com/pricing",
+    "notification_muted": false,
+    "notification_urls": ["mailto://watch@example.com"],
+    "tags": ["tag-1"],
+    "notification_group_routes": {"content_changed": "oncall"}
+  }
+}

@@ -26,6 +26,34 @@ EXPECTED_TOOLS = {
     "mute_tag",
     "unmute_tag",
     "get_system_info",
+    "pause_watches",
+    "unpause_watches",
+    "mute_watches",
+    "unmute_watches",
+    "recheck_watches",
+    "recheck_all_watches",
+    "delete_watches",
+    "import_watches",
+    "export_watch_urls",
+    "list_notification_urls",
+    "add_notification_urls",
+    "remove_notification_urls",
+    "replace_notification_urls",
+    "list_notification_groups",
+    "get_notification_group",
+    "create_notification_group",
+    "update_notification_group",
+    "add_notification_group_destinations",
+    "remove_notification_group_destinations",
+    "replace_notification_group_destinations",
+    "delete_notification_group",
+    "get_global_notification_routes",
+    "set_global_notification_routes",
+    "get_watch_notification_routes",
+    "set_watch_notification_routes",
+    "get_tag_notification_routes",
+    "set_tag_notification_routes",
+    "explain_watch_notifications",
 }
 
 
@@ -41,6 +69,13 @@ def test_tool_catalogue(mcp_app):
             assert create.annotations.read_only_hint is False
             info = next(tool for tool in listed.tools if tool.name == "get_system_info")
             assert info.annotations.read_only_hint is True
+            groups = next(tool for tool in listed.tools if tool.name == "list_notification_groups")
+            assert groups.annotations.read_only_hint is True
+            bulk_delete = next(tool for tool in listed.tools if tool.name == "delete_watches")
+            assert bulk_delete.annotations.destructive_hint is True
+            assert "confirm" in bulk_delete.input_schema["required"]
+            single_delete = next(tool for tool in listed.tools if tool.name == "delete_watch")
+            assert "confirm" not in single_delete.input_schema.get("required", [])
 
     anyio.run(scenario)
 
@@ -62,7 +97,8 @@ def test_watch_lifecycle_and_diff(api, mcp_app):
             watch = created["watch"]
             assert watch["title"] == "Item"
             assert watch["include_filters"] == ["h1", "json:$.price"]
-            assert watch["notification_urls"] == ["discord://hook/token"]
+            assert watch["notification_urls"] == ["discord://***/***"]
+            assert "token" not in str(watch["notification_urls"])
             assert watch["time_between_check"]["hours"] == 4
             assert watch["time_between_check_use_default"] is False
 
@@ -86,6 +122,8 @@ def test_watch_lifecycle_and_diff(api, mcp_app):
             assert updated["watch"]["title"] == "Item page"
             assert updated["watch"]["time_between_check"]["minutes"] == 30
             assert updated["watch"]["time_between_check"]["hours"] is None
+            assert updated["watch"]["notification_urls"] == ["mailto://user:***@example.com"]
+            assert "pass" not in str(updated["watch"]["notification_urls"])
 
             await call(client, "pause_watch", {"uuid": watch_uuid})
             assert (await call(client, "get_watch", {"uuid": watch_uuid}))["paused"] is True

@@ -115,11 +115,16 @@ def construct_blueprint(datastore: ChangeDetectionStore):
                                        default_system_settings = datastore.data['settings'],
                                        )
 
+        from changedetectionio.notification_groups import NOTIFICATION_EVENTS
+
         template_args = {
             'data': default,
             'form': form,
             'watch': default,
             'extra_notification_token_placeholder_info': datastore.get_unique_notification_token_placeholders_available(),
+            'notification_events': NOTIFICATION_EVENTS,
+            'notification_groups': datastore.list_notification_groups(),
+            'route_values': default.get('notification_group_routes') or {},
         }
 
         included_content = {}
@@ -177,8 +182,18 @@ def construct_blueprint(datastore: ChangeDetectionStore):
 #                flash(','.join(l), 'error')
 #           return redirect(url_for('tags.form_tag_edit_submit', uuid=uuid))
 
+        from changedetectionio.notification_groups import routes_from_form
+
+        try:
+            parsed_routes = routes_from_form(request.form, datastore.data['settings']['application'])
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return redirect(url_for('tags.form_tag_edit', uuid=uuid) + '#notifications')
+
         datastore.data['settings']['application']['tags'][uuid].update(form.data)
         datastore.data['settings']['application']['tags'][uuid]['processor'] = 'restock_diff'
+        if parsed_routes is not None:
+            datastore.data['settings']['application']['tags'][uuid]['notification_group_routes'] = parsed_routes
         datastore.needs_write_urgent = True
         flash("Updated")
 

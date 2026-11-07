@@ -136,6 +136,20 @@ class NotificationService:
 
         return None
 
+    def _resolve(self, watch, event):
+        from changedetectionio.notification_groups import resolve_notification_targets
+
+        tags = {}
+        watch_uuid = watch.get('uuid') if watch else None
+        if watch_uuid:
+            tags = self.datastore.get_all_tags_for_watch(uuid=watch_uuid) or {}
+        return resolve_notification_targets(
+            self.datastore.data['settings']['application'],
+            watch,
+            tags,
+            event,
+        )
+
     def send_content_changed_notification(self, watch_uuid):
         """
         Send notification when content changes are detected
@@ -156,13 +170,14 @@ class NotificationService:
 
         # Should be a better parent getter in the model object
 
-        # Prefer - Individual watch settings > Tag settings >  Global settings (in that order)
-        n_object['notification_urls'] = self._check_cascading_vars('notification_urls', watch)
+        # Title, body, and format still follow watch, then tag, then system settings.
+        # Destinations follow notification groups for this alert, then that same URL cascade.
+        resolution = self._resolve(watch, 'content_changed')
+        n_object['notification_urls'] = resolution.urls
         n_object['notification_title'] = self._check_cascading_vars('notification_title', watch)
         n_object['notification_body'] = self._check_cascading_vars('notification_body', watch)
         n_object['notification_format'] = self._check_cascading_vars('notification_format', watch)
 
-        # (Individual watch) Only prepare to notify if the rules above matched
         queued = False
         if n_object and n_object.get('notification_urls'):
             queued = True
@@ -171,6 +186,11 @@ class NotificationService:
             self.datastore.update_watch(uuid=watch_uuid, update_obj={'notification_alert_count': count})
 
             self.queue_notification_for_watch(n_object=n_object, watch=watch)
+        else:
+            logger.debug(
+                f"Not queueing content-change notification for {watch_uuid} "
+                f"(source {resolution.source}, destinations {len(resolution.urls)})"
+            )
 
         return queued
 
@@ -189,21 +209,22 @@ class NotificationService:
                         threshold),
                     'notification_format': 'text'}
 
-        if len(watch['notification_urls']):
-            n_object['notification_urls'] = watch['notification_urls']
-
-        elif len(self.datastore.data['settings']['application']['notification_urls']):
-            n_object['notification_urls'] = self.datastore.data['settings']['application']['notification_urls']
+        resolution = self._resolve(watch, 'filter_failure')
+        if resolution.urls:
+            n_object['notification_urls'] = resolution.urls
 
         # Only prepare to notify if the rules above matched
-        if 'notification_urls' in n_object:
+        if n_object.get('notification_urls'):
             n_object.update({
                 'watch_url': watch['url'],
                 'uuid': watch_uuid,
                 'screenshot': None
             })
             self.notification_q.put(n_object)
-            logger.debug(f"Sent filter not found notification for {watch_uuid}")
+            logger.debug(
+                f"Queued filter-not-found notification for {watch_uuid} via {resolution.source} "
+                f"({len(resolution.urls)} destinations)"
+            )
         else:
             logger.debug(f"NOT sending filter not found notification for {watch_uuid} - no notification URLs")
 
@@ -222,20 +243,21 @@ class NotificationService:
                                          "Thanks - Your omniscient changedetection.io installation :)\n".format(step_n+1, threshold),
                     'notification_format': 'text'}
 
-        if len(watch['notification_urls']):
-            n_object['notification_urls'] = watch['notification_urls']
-
-        elif len(self.datastore.data['settings']['application']['notification_urls']):
-            n_object['notification_urls'] = self.datastore.data['settings']['application']['notification_urls']
+        resolution = self._resolve(watch, 'step_failure')
+        if resolution.urls:
+            n_object['notification_urls'] = resolution.urls
 
         # Only prepare to notify if the rules above matched
-        if 'notification_urls' in n_object:
+        if n_object.get('notification_urls'):
             n_object.update({
                 'watch_url': watch['url'],
                 'uuid': watch_uuid
             })
             self.notification_q.put(n_object)
-            logger.error(f"Sent step not found notification for {watch_uuid}")
+            logger.error(
+                f"Queued browser-step notification for {watch_uuid} via {resolution.source} "
+                f"({len(resolution.urls)} destinations)"
+            )
 
 
 # Convenience functions for creating notification service instances

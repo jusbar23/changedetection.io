@@ -103,6 +103,14 @@
             </div>
 
             <div class="tab-pane-inner" id="notifications">
+                <p class="ng-link-row">
+                    <a class="pure-button button-secondary" href="{{ url_for('notification_groups.index') }}">Notification groups</a>
+                </p>
+                <p class="ng-help">
+                    The URL list below is the fallback when an alert has no notification group.
+                    Use notification groups when a content change, a missing filter, and a failed browser step
+                    should reach different people. Existing URLs stay here until you edit them.
+                </p>
                 <fieldset>
                     <div class="field-group">
                         {{ render_common_settings_form(form.application.form, emailprefix, settings_application, extra_notification_token_placeholder_info) }}

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -17,6 +20,9 @@ class APIState:
     watches: dict[str, dict[str, Any]] = field(default_factory=dict)
     tags: dict[str, dict[str, Any]] = field(default_factory=dict)
     snapshots: dict[str, dict[str, str]] = field(default_factory=dict)
+    notification_urls: list[str] = field(default_factory=list)
+    notification_groups: dict[str, dict[str, Any]] = field(default_factory=dict)
+    notification_routes: dict[str, str] = field(default_factory=dict)
 
 
 class _APIServer(ThreadingHTTPServer):
@@ -82,9 +88,9 @@ class _Handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
         parts = [part for part in path.split("/") if part]
-        body = self._json_body()
+        body, raw_text = self._read_body()
         with self.server.api_lock:  # type: ignore[attr-defined]
-            self._dispatch(method, parts, query, body)
+            self._dispatch(method, parts, query, body, raw_text)
 
     def _authorized(self) -> bool:
         if not self._state.api_key:
@@ -94,20 +100,52 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(403, {"message": "Invalid access - API key invalid."})
         return False
 
-    def _json_body(self) -> dict[str, Any]:
+    def _read_body(self) -> tuple[dict[str, Any], str]:
         length = int(self.headers.get("Content-Length", "0") or 0)
         raw = self.rfile.read(length) if length else b""
         if not raw:
-            return {}
-        data = json.loads(raw.decode())
-        return data if isinstance(data, dict) else {}
+            return {}, ""
+        text = raw.decode()
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return {}, text
+        return (data if isinstance(data, dict) else {}), text
 
-    def _dispatch(self, method: str, parts: list[str], query: dict[str, list[str]], body: dict[str, Any]) -> None:
+    def _dispatch(self, method: str, parts: list[str], query: dict[str, list[str]], body: dict[str, Any], raw_text: str) -> None:
         if parts == ["api", "v1", "systeminfo"] and method == "GET":
             self._send(200, self._system_info())
             return
         if parts == ["api", "v1", "search"] and method == "GET":
             self._search(query)
+            return
+        if parts == ["api", "v1", "notifications"] and method == "GET":
+            self._send(200, {"notification_urls": list(self._state.notification_urls)})
+            return
+        if parts == ["api", "v1", "notifications"] and method in {"POST", "PUT", "DELETE"}:
+            self._notifications(method, body)
+            return
+        if parts == ["api", "v1", "notification-groups"] and method == "GET":
+            self._send(200, _group_list(self._state))
+            return
+        if parts == ["api", "v1", "notification-groups"] and method == "POST":
+            self._create_group(body)
+            return
+        if parts == ["api", "v1", "notification-routes"] and method == "GET":
+            self._send(200, _route_document(self._state.notification_routes))
+            return
+        if parts == ["api", "v1", "notification-routes"] and method == "PUT":
+            try:
+                self._state.notification_routes = _merge_routes(
+                    self._state.notification_routes, body.get("routes") or {}, self._state
+                )
+            except ValueError as exc:
+                self._send(400, {"message": str(exc)})
+                return
+            self._send(200, {"routes": self._state.notification_routes})
+            return
+        if parts == ["api", "v1", "import"] and method == "POST":
+            self._import(query, raw_text)
             return
         if parts == ["api", "v1", "tags"] and method == "GET":
             self._send(200, self._state.tags)
@@ -115,8 +153,14 @@ class _Handler(BaseHTTPRequestHandler):
         if parts == ["api", "v1", "tag"] and method == "POST":
             self._create_tag(body)
             return
+        if len(parts) == 5 and parts[:3] == ["api", "v1", "tag"] and parts[4] == "notification-routes":
+            self._tag_routes(method, parts[3], body)
+            return
         if len(parts) == 4 and parts[:3] == ["api", "v1", "tag"]:
             self._one_tag(method, parts[3], query, body)
+            return
+        if len(parts) >= 4 and parts[:3] == ["api", "v1", "notification-groups"]:
+            self._group_routes(method, parts[3:], query, body)
             return
         if parts == ["api", "v1", "watch"] and method == "GET":
             self._list_watches(query)
@@ -125,7 +169,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._create_watch(body)
             return
         if len(parts) >= 4 and parts[:3] == ["api", "v1", "watch"]:
-            self._watch_routes(method, parts[3:], query, body)
+            self._watch_collection(method, parts[3:], query, body)
             return
         self._send(404, {"message": "No such API route"})
 
@@ -158,6 +202,11 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, results)
 
     def _list_watches(self, query: dict[str, list[str]]) -> None:
+        if _first(query, "recheck_all"):
+            for watch in self._state.watches.values():
+                watch["last_checked"] = 1
+            self._send(200, {"status": "OK"})
+            return
         tag_limit = _first(query, "tag").strip().lower()
         results = {}
         for watch_uuid, watch in self._state.watches.items():
@@ -178,10 +227,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._state.watches[watch_uuid] = _new_watch(watch_uuid, url, body, tag_uuids)
         self._send(201, {"uuid": watch_uuid})
 
-    def _watch_routes(self, method: str, rest: list[str], query: dict[str, list[str]], body: dict[str, Any]) -> None:
+    def _watch_collection(self, method: str, rest: list[str], query: dict[str, list[str]], body: dict[str, Any]) -> None:
         watch_uuid = rest[0]
         if len(rest) == 1:
             self._watch_document(method, watch_uuid, query, body)
+            return
+        if len(rest) >= 2 and rest[1] == "notification-routes":
+            self._watch_notification_routes(method, watch_uuid, body)
             return
         if len(rest) >= 2 and rest[1] == "history":
             self._watch_history(method, watch_uuid, rest[2:], query)
@@ -325,6 +377,8 @@ class _Handler(BaseHTTPRequestHandler):
             "uuid": tag_uuid,
             "title": title.strip(),
             "notification_muted": False,
+            "notification_urls": [],
+            "notification_group_routes": {},
             "date_created": 1,
         }
         return tag_uuid
@@ -345,6 +399,172 @@ class _Handler(BaseHTTPRequestHandler):
             if tag:
                 titles.append(str(tag.get("title", "")).lower())
         return titles
+
+    def _notifications(self, method: str, body: dict[str, Any]) -> None:
+        urls = [str(url) for url in (body.get("notification_urls") or [])]
+        if method == "POST":
+            added = []
+            for url in urls:
+                if url not in self._state.notification_urls:
+                    self._state.notification_urls.append(url)
+                    added.append(url)
+            if not added:
+                self._send(400, "No valid notification URLs were added")
+                return
+            self._send(201, {"notification_urls": added})
+            return
+        if method == "PUT":
+            self._state.notification_urls = urls
+            self._send(200, {"notification_urls": urls})
+            return
+        self._state.notification_urls = [url for url in self._state.notification_urls if url not in urls]
+        self._send(204, None)
+
+    def _create_group(self, body: dict[str, Any]) -> None:
+        title = str(body.get("title") or "").strip()
+        urls = body.get("notification_urls")
+        if not title or not isinstance(urls, list):
+            self._send(400, {"message": "title and notification_urls are required."})
+            return
+        for group in self._state.notification_groups.values():
+            if str(group.get("title", "")).strip().lower() == title.lower():
+                self._send(409, {"message": "A notification group with that title already exists."})
+                return
+        group_uuid = str(uuid.uuid4())
+        group = {"uuid": group_uuid, "title": title, "notification_urls": [str(url) for url in urls], "date_created": 1}
+        self._state.notification_groups[group_uuid] = group
+        self._send(201, {"uuid": group_uuid, "group": _routing().public_group(group)})
+
+    def _group_routes(self, method: str, parts: list[str], query: dict[str, list[str]], body: dict[str, Any]) -> None:
+        group_uuid = parts[0]
+        group = self._state.notification_groups.get(group_uuid)
+        if len(parts) == 2 and parts[1] == "destinations":
+            if group is None:
+                self._send(404, {"message": f"No notification group exists with the UUID of {group_uuid}"})
+                return
+            urls = [str(url) for url in (body.get("notification_urls") or [])]
+            if method == "POST":
+                added = [url for url in urls if url not in group["notification_urls"]]
+                group["notification_urls"].extend(added)
+                self._send(200, {"added": len(added), "group": _routing().public_group(group)})
+                return
+            if method == "DELETE":
+                if body.get("confirm") is not True:
+                    self._send(400, {"message": "Pass confirm=true. This changes who receives alerts."})
+                    return
+                removed = [url for url in urls if url in group["notification_urls"]]
+                group["notification_urls"] = [url for url in group["notification_urls"] if url not in urls]
+                self._send(200, {"removed": len(removed), "group": _routing().public_group(group)})
+                return
+        if len(parts) != 1:
+            self._send(404, {"message": "No such API route"})
+            return
+        if group is None:
+            self._send(404, {"message": f"No notification group exists with the UUID of {group_uuid}"})
+            return
+        if method == "GET":
+            references = _group_references(self._state, group_uuid)
+            self._send(200, {
+                "group": _routing().public_group(group),
+                "references": {
+                    "watches": len(references["watches"]),
+                    "tags": len(references["tags"]),
+                    "global_events": references["global_events"],
+                },
+            })
+            return
+        if method == "PUT":
+            if "notification_urls" in body and body.get("confirm") is not True:
+                self._send(400, {"message": "Pass confirm=true. This changes who receives alerts."})
+                return
+            if "title" in body:
+                group["title"] = str(body["title"]).strip()
+            if "notification_urls" in body:
+                group["notification_urls"] = [str(url) for url in body["notification_urls"]]
+            self._send(200, {"group": _routing().public_group(group)})
+            return
+        if method == "DELETE":
+            if _first(query, "confirm") != "true":
+                self._send(400, {"message": "Pass confirm=true. This deletes the group and clears it from watches and tags."})
+                return
+            references = _clear_group(self._state, group_uuid)
+            del self._state.notification_groups[group_uuid]
+            self._send(200, {
+                "deleted": True,
+                "cleared_watches": len(references["watches"]),
+                "cleared_tags": len(references["tags"]),
+                "cleared_global_events": references["global_events"],
+            })
+            return
+        self._send(404, {"message": "No such API route"})
+
+    def _watch_notification_routes(self, method: str, watch_uuid: str, body: dict[str, Any]) -> None:
+        watch = self._state.watches.get(watch_uuid)
+        if watch is None:
+            self._send(404, {"message": f"No watch exists with the UUID of {watch_uuid}"})
+            return
+        if method == "GET":
+            self._send(200, _routing().explain_watch(_application(self._state), watch, _watch_tags(self._state, watch)))
+            return
+        if method == "PUT":
+            try:
+                watch["notification_group_routes"] = _merge_routes(
+                    watch.get("notification_group_routes") or {},
+                    body.get("routes") or {},
+                    self._state,
+                )
+            except ValueError as exc:
+                self._send(400, {"message": str(exc)})
+                return
+            self._send(200, {"uuid": watch_uuid, "routes": watch["notification_group_routes"]})
+            return
+        self._send(404, {"message": "No such API route"})
+
+    def _tag_routes(self, method: str, tag_uuid: str, body: dict[str, Any]) -> None:
+        tag = self._state.tags.get(tag_uuid)
+        if tag is None:
+            self._send(404, {"message": f"No tag exists with the UUID of {tag_uuid}"})
+            return
+        events = ("content_changed", "filter_failure", "step_failure")
+        if method == "GET":
+            routes = tag.get("notification_group_routes") or {}
+            self._send(200, {
+                "uuid": tag_uuid,
+                "events": _routing().event_catalog(),
+                "inheritance": _routing().INHERITANCE_TEXT,
+                "routes": {event: routes.get(event) for event in events},
+            })
+            return
+        if method == "PUT":
+            try:
+                tag["notification_group_routes"] = _merge_routes(
+                    tag.get("notification_group_routes") or {},
+                    body.get("routes") or {},
+                    self._state,
+                )
+            except ValueError as exc:
+                self._send(400, {"message": str(exc)})
+                return
+            self._send(200, {"uuid": tag_uuid, "routes": tag["notification_group_routes"]})
+            return
+        self._send(404, {"message": "No such API route"})
+
+    def _import(self, query: dict[str, list[str]], raw_text: str) -> None:
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip() and not line.strip().startswith("#")]
+        created = []
+        dedupe = _first(query, "dedupe").lower() not in {"false", "0", "no"}
+        tag_name = _first(query, "tag").strip()
+        for url in lines:
+            if not (url.startswith("http://") or url.startswith("https://")):
+                self._send(400, "Invalid or unsupported URL")
+                return
+            if dedupe and any(str(watch.get("url")) == url for watch in self._state.watches.values()):
+                continue
+            watch_uuid = str(uuid.uuid4())
+            tags = [self._ensure_tag(tag_name)] if tag_name else []
+            self._state.watches[watch_uuid] = _new_watch(watch_uuid, url, {}, tags)
+            created.append(watch_uuid)
+        self._send(200, created)
 
     def _send(self, status: int, payload: Any, content_type: str = "application/json") -> None:
         if status == 204 or payload is None:
@@ -383,7 +603,8 @@ def _new_watch(watch_uuid: str, url: str, body: dict[str, Any], tag_uuids: list[
         "trigger_text": list(body.get("trigger_text") or []),
         "notification_urls": list(body.get("notification_urls") or []),
         "paused": bool(body.get("paused") or False),
-        "notification_muted": False,
+        "notification_muted": bool(body.get("notification_muted") or False),
+        "notification_group_routes": dict(body.get("notification_group_routes") or {}),
         "last_checked": 0,
         "last_changed": 0,
         "last_error": False,
@@ -418,3 +639,96 @@ def _summary(watch: dict[str, Any]) -> dict[str, Any]:
 def _first(query: dict[str, list[str]], key: str) -> str:
     values = query.get(key) or []
     return values[0] if values else ""
+
+
+_ROUTING = None
+
+
+def _routing():
+    global _ROUTING
+    if _ROUTING is None:
+        path = Path(__file__).resolve().parents[2] / "changedetectionio" / "notification_groups.py"
+        spec = importlib.util.spec_from_file_location("cdio_notification_groups", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _ROUTING = module
+    return _ROUTING
+
+
+def _application(state: APIState) -> dict[str, Any]:
+    return {
+        "notification_groups": state.notification_groups,
+        "notification_group_routes": state.notification_routes,
+        "notification_urls": state.notification_urls,
+    }
+
+
+def _watch_tags(state: APIState, watch: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        tag_uuid: state.tags[tag_uuid]
+        for tag_uuid in watch.get("tags") or []
+        if tag_uuid in state.tags
+    }
+
+
+def _route_document(routes: dict[str, str]) -> dict[str, Any]:
+    routing = _routing()
+    return {
+        "events": routing.event_catalog(),
+        "inheritance": routing.INHERITANCE_TEXT,
+        "routes": {event: routes.get(event) for event in routing.NOTIFICATION_EVENTS},
+    }
+
+
+def _group_list(state: APIState) -> dict[str, Any]:
+    routing = _routing()
+    return {
+        "events": routing.event_catalog(),
+        "inheritance": routing.INHERITANCE_TEXT,
+        "groups": {group_uuid: routing.public_group(group) for group_uuid, group in state.notification_groups.items()},
+    }
+
+
+def _merge_routes(current: dict[str, Any], patch: dict[str, Any], state: APIState) -> dict[str, str]:
+    merged = {event: group_uuid for event, group_uuid in current.items() if group_uuid}
+    for event, group_uuid in patch.items():
+        if event not in {"content_changed", "filter_failure", "step_failure"}:
+            raise ValueError(event)
+        if group_uuid in (None, ""):
+            merged.pop(event, None)
+            continue
+        if str(group_uuid) not in state.notification_groups:
+            raise ValueError(group_uuid)
+        merged[event] = str(group_uuid)
+    return merged
+
+
+def _group_references(state: APIState, group_uuid: str) -> dict[str, Any]:
+    watches = [
+        watch_uuid
+        for watch_uuid, watch in state.watches.items()
+        if group_uuid in (watch.get("notification_group_routes") or {}).values()
+    ]
+    tags = [
+        tag_uuid
+        for tag_uuid, tag in state.tags.items()
+        if group_uuid in (tag.get("notification_group_routes") or {}).values()
+    ]
+    global_events = [event for event, assigned in state.notification_routes.items() if assigned == group_uuid]
+    return {"watches": watches, "tags": tags, "global_events": global_events}
+
+
+def _clear_group(state: APIState, group_uuid: str) -> dict[str, Any]:
+    references = _group_references(state, group_uuid)
+    for watch in state.watches.values():
+        routes = watch.get("notification_group_routes") or {}
+        watch["notification_group_routes"] = {event: assigned for event, assigned in routes.items() if assigned != group_uuid}
+    for tag in state.tags.values():
+        routes = tag.get("notification_group_routes") or {}
+        tag["notification_group_routes"] = {event: assigned for event, assigned in routes.items() if assigned != group_uuid}
+    state.notification_routes = {
+        event: assigned for event, assigned in state.notification_routes.items() if assigned != group_uuid
+    }
+    return references

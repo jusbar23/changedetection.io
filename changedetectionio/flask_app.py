@@ -39,6 +39,14 @@ from loguru import logger
 from changedetectionio import __version__
 from changedetectionio import queuedWatchMetaData
 from changedetectionio.api import Watch, WatchHistory, WatchSingleHistory, CreateWatch, Import, SystemInfo, Tag, Tags, Notifications, WatchFavicon
+from changedetectionio.api.NotificationGroups import (
+    GlobalNotificationRoutes,
+    NotificationGroup,
+    NotificationGroupDestinations,
+    NotificationGroupList,
+    TagNotificationRoutes,
+    WatchNotificationRoutes,
+)
 from changedetectionio.api.Search import Search
 from .time_handler import is_within_schedule
 
@@ -337,6 +345,22 @@ def changedetection_app(config=None, datastore_o=None):
     watch_api.add_resource(Notifications, '/api/v1/notifications',
                            resource_class_kwargs={'datastore': datastore})
 
+    watch_api.add_resource(NotificationGroupList, '/api/v1/notification-groups',
+                           resource_class_kwargs={'datastore': datastore})
+    watch_api.add_resource(NotificationGroup, '/api/v1/notification-groups/<string:uuid>',
+                           resource_class_kwargs={'datastore': datastore})
+    watch_api.add_resource(NotificationGroupDestinations,
+                           '/api/v1/notification-groups/<string:uuid>/destinations',
+                           resource_class_kwargs={'datastore': datastore})
+    watch_api.add_resource(GlobalNotificationRoutes, '/api/v1/notification-routes',
+                           resource_class_kwargs={'datastore': datastore})
+    watch_api.add_resource(WatchNotificationRoutes,
+                           '/api/v1/watch/<string:uuid>/notification-routes',
+                           resource_class_kwargs={'datastore': datastore})
+    watch_api.add_resource(TagNotificationRoutes,
+                           '/api/v1/tag/<string:uuid>/notification-routes',
+                           resource_class_kwargs={'datastore': datastore})
+
     @login_manager.user_loader
     def user_loader(email):
         user = User()
@@ -510,6 +534,8 @@ def changedetection_app(config=None, datastore_o=None):
 
     import changedetectionio.blueprint.settings as settings
     app.register_blueprint(settings.construct_blueprint(datastore), url_prefix='/settings')
+    from changedetectionio.blueprint.notification_groups import construct_blueprint as construct_notification_groups_blueprint
+    app.register_blueprint(construct_notification_groups_blueprint(datastore), url_prefix='/settings/notification-groups')
 
     import changedetectionio.conditions.blueprint as conditions
     app.register_blueprint(conditions.construct_blueprint(datastore), url_prefix='/conditions')

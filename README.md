@@ -286,7 +286,9 @@ Supports managing the website watch list [via our API](https://changedetection.i
 
 ## MCP server
 
-An MCP server in `mcp_server/` exposes that same REST API (`/api/v1`) as tools so an assistant can list and search watches, read a watch plus its latest and previous snapshots, history, and a unified diff, create and update watches (URL, title, tags, check interval, CSS/XPath/JSONPath/jq filters, notification URLs), pause, unpause, mute, queue a recheck, manage tags, and read system info.
+An MCP server in `mcp_server/` exposes that same REST API (`/api/v1`) as tools so an assistant can list and search watches, read a watch plus its latest and previous snapshots, history, and a unified diff, create and update watches (URL, title, tags, check interval, CSS/XPath/JSONPath/jq filters, notification URLs), pause, unpause, mute, queue a recheck, import and export URLs, manage tags, manage notification groups, and read system info.
+
+Notification groups are named lists of the Apprise destinations you already use. In the UI they are under **Settings → Notifications → Notification groups**, and each watch or tag Notifications tab has a dropdown per alert. The alerts are a content change (this includes restock and price changes), a missing filter, and a failed browser step. A group replaces the URL list for that alert. Empty assignments keep the previous URL-list behavior. See [mcp_server/README.md](mcp_server/README.md) for install, connection, the action-to-tool matrix, and what is intentionally not exposed.
 
 The server does not import the Flask app. Diffs are built from the text snapshots the history API already returns, because `/api/v1` has no diff route. The web app's default command is unchanged. In Docker, Compose runs the web app and the MCP server as two containers from the same image.
 

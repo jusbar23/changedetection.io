@@ -31,7 +31,9 @@ def _serve(server, port: int) -> tuple[uvicorn.Server, threading.Thread]:
         stateless_http=True,
         json_response=True,
     )
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    # ws="none" avoids importing the websockets stack. Streamable HTTP in this
+    # test is plain HTTP, and the app image keeps MCP dependencies in their own venv.
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", ws="none")
     http_server = uvicorn.Server(config)
     thread = threading.Thread(target=http_server.run, daemon=True)
     thread.start()

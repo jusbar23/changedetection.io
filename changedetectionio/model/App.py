@@ -1,3 +1,4 @@
+from copy import deepcopy
 from os import getenv
 
 from changedetectionio.blueprint.rss import RSS_FORMAT_TYPES
@@ -49,6 +50,10 @@ class model(dict):
                     'notification_format': default_notification_format,
                     'notification_title': default_notification_title,
                     'notification_urls': [], # Apprise URL list
+                    # Named lists of those same URLs, and which alert uses which list.
+                    # Empty routes keep the legacy notification_urls behavior.
+                    'notification_groups': {},
+                    'notification_group_routes': {},
                     'pager_size': 50,
                     'password': False,
                     'render_anchor_tag_content': False,
@@ -71,7 +76,9 @@ class model(dict):
 
     def __init__(self, *arg, **kw):
         super(model, self).__init__(*arg, **kw)
-        self.update(self.base_config)
+        # base_config is a class attribute. A shallow copy would share nested
+        # dicts (watches, tags, notification groups) across every datastore.
+        self.update(deepcopy(self.base_config))
 
 
 def parse_headers_from_text_file(filepath):
