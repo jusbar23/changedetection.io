@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="edit-form ng-page">
+    <div class="box-wrap inner">
+        <header class="ng-header">
+            <p class="ng-kicker">Notifications</p>
+            <h2>Notification groups</h2>
+            <p>
+                A notification group is a named list of the same notification URLs you already use
+                (email, Discord, and the other Apprise destinations). Assign a group to an alert
+                from the dropdown on a watch, a tag, or the system defaults below.
+                This is separate from watch tags, which the main menu calls Groups.
+            </p>
+        </header>
+
+        <section class="ng-card" aria-labelledby="ng-inheritance-heading">
+            <h3 id="ng-inheritance-heading">How an alert chooses who to notify</h3>
+            <p>{{ inheritance }}</p>
+        </section>
+
+        <section class="ng-card" aria-labelledby="ng-system-heading">
+            <h3 id="ng-system-heading">System default for each alert</h3>
+            <p class="ng-help">Inherit here means “use the notification URL list in Settings → Notifications”.</p>
+            <form class="pure-form pure-form-stacked" method="post" action="{{ url_for('notification_groups.routes') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% set route_context = 'system' %}
+                {% include "notification_group_routes.html" %}
+                <button class="pure-button pure-button-primary" type="submit">Save system defaults</button>
+            </form>
+        </section>
+
+        <section aria-labelledby="ng-existing-heading">
+            <h3 id="ng-existing-heading">Groups</h3>
+            {% if not cards %}
+                <p class="ng-empty">No notification groups yet. The notification URL lists you already saved still work.</p>
+            {% endif %}
+            {% for card in cards %}
+                <article class="ng-card">
+                    <header class="ng-card-title">
+                        <h4>{{ card.group.title }}</h4>
+                        <p class="ng-meta">
+                            {% set destination_count = card.public.destination_count %}
+                            {% set watch_count = card.references.watches|length %}
+                            {% set tag_count = card.references.tags|length %}
+                            {{ destination_count }} destination{{ '' if destination_count == 1 else 's' }}.
+                            Used by {{ watch_count }} watch{{ '' if watch_count == 1 else 'es' }},
+                            {{ tag_count }} tag{{ '' if tag_count == 1 else 's' }},
+                            {% if card.references.global_events %}
+                                and system alerts: {{ card.references.global_events|join(', ') }}.
+                            {% else %}
+                                and no system alert.
+                            {% endif %}
+                        </p>
+                    </header>
+                    <ul class="ng-destinations">
+                        {% for destination in card.public.destinations %}
+                            <li><code class="ng-secret">{{ destination }}</code></li>
+                        {% else %}
+                            <li>No destinations. Assigning this group notifies nobody for that alert.</li>
+                        {% endfor %}
+                    </ul>
+                    <p class="ng-help">The list above hides secrets. The edit box still contains the full URLs because you are signed in to this instance. Replacing them requires confirmation and does not change any other group.</p>
+                    <details class="ng-details">
+                        <summary>Edit {{ card.group.title }}</summary>
+                        <form class="pure-form pure-form-stacked" method="post" action="{{ url_for('notification_groups.update', uuid=card.group.uuid) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <label for="title-{{ card.group.uuid }}">Name</label>
+                            <input id="title-{{ card.group.uuid }}" name="title" type="text" required maxlength="200" value="{{ card.group.title }}" autocomplete="off">
+                            <label for="urls-{{ card.group.uuid }}">Destinations, one per line</label>
+                            <textarea id="urls-{{ card.group.uuid }}" name="notification_urls" rows="5" spellcheck="false" autocomplete="off" aria-describedby="urls-hint-{{ card.group.uuid }}">{{ (card.group.notification_urls or [])|join('\n') }}</textarea>
+                            <span class="pure-form-message-inline" id="urls-hint-{{ card.group.uuid }}">Use the same URL formats as Settings → Notifications. file:// and javascript: URLs are rejected.</span>
+                            <label class="ng-confirm" for="confirm-edit-{{ card.group.uuid }}">
+                                <input id="confirm-edit-{{ card.group.uuid }}" type="checkbox" name="confirm" value="yes" required>
+                                Replace this group's destinations. Watches that use it will follow this list.
+                            </label>
+                            <button class="pure-button pure-button-primary" type="submit">Save group</button>
+                        </form>
+                    </details>
+                    <form class="ng-delete" method="post" action="{{ url_for('notification_groups.delete', uuid=card.group.uuid) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <label class="ng-confirm" for="confirm-delete-{{ card.group.uuid }}">
+                            <input id="confirm-delete-{{ card.group.uuid }}" type="checkbox" name="confirm" value="yes" required>
+                            Delete this group and clear it from watches and tags. Their alerts fall back to the next level. URL lists are kept.
+                        </label>
+                        <button class="pure-button button-error" type="submit">Delete group</button>
+                    </form>
+                </article>
+            {% endfor %}
+        </section>
+
+        <section class="ng-card" aria-labelledby="ng-create-heading">
+            <h3 id="ng-create-heading">New group</h3>
+            <form class="pure-form pure-form-stacked" method="post" action="{{ url_for('notification_groups.create') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="new-group-title">Name</label>
+                <input id="new-group-title" name="title" type="text" required maxlength="200" placeholder="On-call" autocomplete="off">
+                <label for="new-group-urls">Destinations, one per line</label>
+                <textarea id="new-group-urls" name="notification_urls" rows="4" spellcheck="false" autocomplete="off" placeholder="mailto://oncall@example.com" aria-describedby="new-group-hint"></textarea>
+                <span class="pure-form-message-inline" id="new-group-hint">Leave this empty to make a group that notifies nobody when it is selected.</span>
+                <button class="pure-button pure-button-primary" type="submit">Create group</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}

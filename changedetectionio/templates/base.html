@@ -11,6 +11,7 @@
     {% endif %}
     <link rel="stylesheet" href="{{url_for('static_content', group='styles', filename='pure-min.css')}}" >
     <link rel="stylesheet" href="{{url_for('static_content', group='styles', filename='styles.css')}}?v={{ get_css_version() }}" >
+    <link rel="stylesheet" href="{{url_for('static_content', group='styles', filename='notification-groups.css')}}?v={{ get_css_version() }}" >
     {% if extra_stylesheets %}
       {% for m in extra_stylesheets %}
         <link rel="stylesheet" href="{{ m }}?ver={{ get_css_version() }}" >

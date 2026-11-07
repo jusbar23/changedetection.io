@@ -112,7 +112,17 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
                 form.proxy.choices.append(tuple((p, datastore.proxy_list[p]['label'])))
 
 
-        if request.method == 'POST' and form.validate():
+        from changedetectionio.notification_groups import routes_from_form
+
+        parsed_routes = None
+        route_error = None
+        if request.method == 'POST':
+            try:
+                parsed_routes = routes_from_form(request.form, datastore.data['settings']['application'])
+            except ValueError as exc:
+                route_error = str(exc)
+
+        if request.method == 'POST' and form.validate() and route_error is None:
 
             # If they changed processor, it makes sense to reset it.
             if datastore.data['watching'][uuid].get('processor') != form.data.get('processor'):
@@ -159,6 +169,8 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
 
             datastore.data['watching'][uuid].update(form.data)
             datastore.data['watching'][uuid].update(extra_update_obj)
+            if parsed_routes is not None:
+                datastore.data['watching'][uuid]['notification_group_routes'] = parsed_routes
 
             if not datastore.data['watching'][uuid].get('tags'):
                 # Force it to be a list, because form.data['tags'] will be string if nothing found
@@ -211,7 +223,9 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
             return redirect(url_for('watchlist.index', tag=request.args.get("tag",'')))
 
         else:
-            if request.method == 'POST' and not form.validate():
+            if route_error:
+                flash(route_error, "error")
+            elif request.method == 'POST' and not form.validate():
                 flash("An error occurred, please see below.", "error")
 
             # JQ is difficult to install on windows and must be manually added (outside requirements.txt)
@@ -237,6 +251,8 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
             # Import the global plugin system
             from changedetectionio.pluggy_interface import collect_ui_edit_stats_extras
             
+            from changedetectionio.notification_groups import NOTIFICATION_EVENTS
+
             template_args = {
                 'available_processors': processors.available_processors(),
                 'available_timezones': sorted(available_timezones()),
@@ -257,6 +273,9 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
                 'ui_edit_stats_extras': collect_ui_edit_stats_extras(watch),
                 'visual_selector_data_ready': datastore.visualselector_data_is_ready(watch_uuid=uuid),
                 'timezone_default_config': datastore.data['settings']['application'].get('timezone'),
+                'notification_events': NOTIFICATION_EVENTS,
+                'notification_groups': datastore.list_notification_groups(),
+                'route_values': watch.get('notification_group_routes') or {},
                 'using_global_webdriver_wait': not default['webdriver_delay'],
                 'uuid': uuid,
                 'watch': watch,

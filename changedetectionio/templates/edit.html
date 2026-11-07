@@ -273,6 +273,8 @@ Math: {{ 1 + 1 }}") }}
                     </div>
                     {% endif %}
                     <div class="field-group" id="notification-field-group">
+                        {% set route_context = 'watch' %}
+                        {% include "notification_group_routes.html" %}
                         {% if has_default_notification_urls %}
                         <div class="inline-warning">
                             <img class="inline-warning-icon" src="{{url_for('static_content', group='images', filename='notice.svg')}}" alt="Look out!" title="Lookout!" >

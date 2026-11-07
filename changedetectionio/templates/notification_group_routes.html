@@ -1,0 +1,45 @@
+{# Dropdowns for the three alerts the workers already send. Empty means inherit. #}
+<div class="ng-routes" aria-labelledby="ng-routes-heading">
+    {% if route_context != 'system' %}
+    <h3 id="ng-routes-heading">Notification groups</h3>
+    <p class="ng-help" id="ng-routes-help">
+        {% if route_context == 'tag' %}
+        Pick a group for each alert on watches that use this tag.
+        <strong>Inherit</strong> uses the system group, then the notification URL list.
+        A watch that sets its own group still wins.
+        {% else %}
+        Pick a group for each alert. <strong>Inherit</strong> uses the next level:
+        this watch's tags, then the system default, then the notification URL list below.
+        {% endif %}
+        A group replaces that list for the selected alert only, so the same destination is not notified twice.
+        <a href="{{ url_for('notification_groups.index') }}">Manage notification groups</a>.
+        Notification groups are separate from watch tags.
+    </p>
+    {% else %}
+    <h3 id="ng-routes-heading" class="visually-hidden">System notification groups</h3>
+    {% endif %}
+    <div class="ng-route-grid">
+        {% for event_id, event in notification_events.items() %}
+            {% set selected = (route_values or {}).get(event_id, '') %}
+            {% set missing = selected and selected not in notification_groups %}
+            <div class="ng-route">
+                <label for="notification-group-route-{{ event_id }}">{{ event.label }}</label>
+                <select id="notification-group-route-{{ event_id }}"
+                        name="notification_group_route_{{ event_id }}"
+                        aria-describedby="ng-route-hint-{{ event_id }}">
+                    <option value="" {% if not selected or missing %}selected{% endif %}>Inherit — use the next level</option>
+                    {% for group_uuid, group in notification_groups.items() %}
+                        {% set destination_count = (group.notification_urls or [])|length %}
+                        <option value="{{ group_uuid }}" {% if selected == group_uuid %}selected{% endif %}>
+                            {{ group.title }} ({{ destination_count }} destination{{ '' if destination_count == 1 else 's' }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <span class="pure-form-message-inline" id="ng-route-hint-{{ event_id }}">{{ event.description }}</span>
+                {% if missing %}
+                    <span class="pure-form-message-inline ng-missing">The previously selected group no longer exists. Saving will inherit instead.</span>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</div>

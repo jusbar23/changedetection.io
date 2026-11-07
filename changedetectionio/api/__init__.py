@@ -31,3 +31,11 @@ from .Tags import Tags, Tag
 from .Import import Import
 from .SystemInfo import SystemInfo
 from .Notifications import Notifications
+from .NotificationGroups import (  # noqa: F401
+    GlobalNotificationRoutes,
+    NotificationGroup,
+    NotificationGroupDestinations,
+    NotificationGroupList,
+    TagNotificationRoutes,
+    WatchNotificationRoutes,
+)

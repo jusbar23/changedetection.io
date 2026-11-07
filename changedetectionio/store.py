@@ -973,9 +973,21 @@ class ChangeDetectionStore:
                         f_d.write(zlib.compress(f_j.read()))
                         os.unlink(json_path)
 
+    # Add notification group storage without copying existing URL lists into a group.
+    # Empty routes keep the previous notification behavior.
+    def update_20(self):
+        from changedetectionio.notification_groups import ensure_storage
+
+        application = self.data['settings']['application']
+        ensure_storage(application)
+        for watch in self.data['watching'].values():
+            watch.setdefault('notification_group_routes', {})
+        for tag in application.get('tags', {}).values():
+            if isinstance(tag, dict):
+                tag.setdefault('notification_group_routes', {})
+
     def add_notification_url(self, notification_url):
-        
-        logger.debug(f">>> Adding new notification_url - '{notification_url}'")
+        logger.debug("Adding a notification URL")
 
         notification_urls = self.data['settings']['application'].get('notification_urls', [])
 
@@ -994,4 +1006,84 @@ class ChangeDetectionStore:
             self.needs_write = True
 
         return notification_url
+
+    def _application(self):
+        from changedetectionio.notification_groups import ensure_storage
+
+        application = self.data['settings']['application']
+        ensure_storage(application)
+        return application
+
+    def list_notification_groups(self):
+        return self._application()['notification_groups']
+
+    def get_notification_group(self, group_uuid):
+        return self.list_notification_groups().get(group_uuid)
+
+    def add_notification_group(self, title, notification_urls):
+        from changedetectionio.notification_groups import create_group
+
+        group = create_group(self._application(), title, notification_urls)
+        self.needs_write_urgent = True
+        return group
+
+    def update_notification_group(self, group_uuid, title=None, notification_urls=None):
+        from changedetectionio.notification_groups import update_group
+
+        group = update_group(
+            self._application(),
+            group_uuid,
+            title=title,
+            urls=notification_urls,
+        )
+        self.needs_write_urgent = True
+        return group
+
+    def add_notification_group_destinations(self, group_uuid, notification_urls):
+        from changedetectionio.notification_groups import add_destinations
+
+        added = add_destinations(self._application(), group_uuid, notification_urls)
+        self.needs_write_urgent = True
+        return added
+
+    def remove_notification_group_destinations(self, group_uuid, notification_urls):
+        from changedetectionio.notification_groups import remove_destinations
+
+        removed = remove_destinations(self._application(), group_uuid, notification_urls)
+        self.needs_write_urgent = True
+        return removed
+
+    def delete_notification_group(self, group_uuid):
+        from changedetectionio.notification_groups import delete_group
+
+        references = delete_group(self._application(), self.data['watching'], group_uuid)
+        self.needs_write_urgent = True
+        return references
+
+    def notification_group_references(self, group_uuid):
+        from changedetectionio.notification_groups import group_references
+
+        return group_references(self._application(), self.data['watching'], group_uuid)
+
+    def set_notification_group_routes(self, patch, *, watch_uuid=None, tag_uuid=None):
+        from changedetectionio.notification_groups import merge_routes
+
+        application = self._application()
+        if watch_uuid:
+            target = self.data['watching'].get(watch_uuid)
+            if target is None:
+                raise KeyError(watch_uuid)
+        elif tag_uuid:
+            target = application['tags'].get(tag_uuid)
+            if target is None:
+                raise KeyError(tag_uuid)
+        else:
+            target = application
+        target['notification_group_routes'] = merge_routes(
+            target.get('notification_group_routes'),
+            patch,
+            application['notification_groups'],
+        )
+        self.needs_write_urgent = True
+        return target['notification_group_routes']
 

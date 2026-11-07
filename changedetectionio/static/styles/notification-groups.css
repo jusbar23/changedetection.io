@@ -1,0 +1,133 @@
+/* Notification groups and small focus treatment. Uses the existing theme tokens. */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+    outline: 2px solid var(--color-link);
+    outline-offset: 2px;
+}
+
+.ng-page h2,
+.ng-page h3,
+.ng-page h4 {
+    margin-top: 0;
+}
+
+.ng-header {
+    margin-bottom: 1rem;
+}
+
+.ng-kicker {
+    margin: 0 0 0.25rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-input-description);
+}
+
+.ng-card {
+    background: var(--color-background);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-table-cell);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    margin: 0 0 0.9rem;
+}
+
+.ng-help,
+.ng-meta,
+.ng-empty {
+    color: var(--color-text-input-description);
+}
+
+.ng-route-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.ng-route label,
+.ng-card label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+}
+
+.ng-route select,
+.ng-card input[type="text"],
+.ng-card textarea {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.ng-destinations {
+    list-style: none;
+    padding-left: 0;
+    margin: 0.4rem 0 0.6rem;
+}
+
+.ng-secret {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    background: var(--color-background-code);
+    color: var(--color-text);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    overflow-wrap: anywhere;
+}
+
+.ng-confirm {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-weight: normal;
+    margin: 0.6rem 0;
+}
+
+.ng-confirm input {
+    margin-top: 0.2rem;
+}
+
+.ng-details {
+    margin: 0.4rem 0 0.8rem;
+}
+
+.ng-details summary {
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.ng-delete {
+    border-top: 1px solid var(--color-border-table-cell);
+    padding-top: 0.6rem;
+}
+
+.ng-missing {
+    color: var(--color-warning);
+}
+
+.ng-routes {
+    border: 1px solid var(--color-border-notification);
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem 0.2rem;
+    margin-bottom: 1rem;
+}
+
+.ng-link-row {
+    margin: 0 0 0.8rem;
+}
+
+@media (max-width: 760px) {
+    .ng-card {
+        padding: 0.75rem;
+    }
+
+    .ng-route-grid {
+        grid-template-columns: 1fr;
+    }
+}

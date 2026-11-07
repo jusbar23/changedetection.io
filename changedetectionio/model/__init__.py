@@ -46,6 +46,8 @@ class watch_base(dict):
             'notification_screenshot': False,  # Include the latest screenshot if available and supported by the apprise URL
             'notification_title': None,
             'notification_urls': [],  # List of URLs to add to the notification Queue (Usually AppRise)
+            # Per-alert notification group ids. Empty means inherit. See notification_groups.py.
+            'notification_group_routes': {},
             'paused': False,
             'previous_md5': False,
             'previous_md5_before_filters': False,  # Used for skipping changedetection entirely

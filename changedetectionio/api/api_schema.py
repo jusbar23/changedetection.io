@@ -112,6 +112,17 @@ def build_watch_json_schema(d):
 
     schema['properties']['time_between_check'] = build_time_between_check_json_schema()
 
+    # Alert type -> notification group UUID. Null or "" clears that alert back to inheritance.
+    schema['properties']['notification_group_routes'] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "content_changed": {"anyOf": [{"type": "string", "maxLength": 80}, {"type": "null"}]},
+            "filter_failure": {"anyOf": [{"type": "string", "maxLength": 80}, {"type": "null"}]},
+            "step_failure": {"anyOf": [{"type": "string", "maxLength": 80}, {"type": "null"}]},
+        },
+    }
+
     schema['properties']['browser_steps'] = {
         "anyOf": [
             {
